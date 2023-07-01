@@ -4,17 +4,14 @@ import (
 	"bufio"
 	"database/sql"
 	"fmt"
-	"log"
+    "github.com/joho/godotenv"
+	_ "github.com/go-sql-driver/mysql"
 	"os"
 	"strings"
-
-	"github.com/joho/godotenv"
-
-	_ "github.com/go-sql-driver/mysql"
+	"log"
 )
-
 func main() {
-	// Load .env file
+
 	err := godotenv.Load()
 	if err != nil {
 		log.Fatal("Error loading .env file")
@@ -40,10 +37,8 @@ func main() {
 
 	fmt.Println("Connection established successfully")
 
-	// Create a reader to read from stdin
 	reader := bufio.NewReader(os.Stdin)
 
-	// Open the log file
 	file, err := os.OpenFile("log.txt", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		log.Fatal(err)
@@ -59,7 +54,6 @@ func main() {
 			break
 		}
 
-		// Write the query to the log file
 		if _, err := file.WriteString(text + "\n"); err != nil {
 			log.Println("Error writing to log file:", err)
 			continue
@@ -72,53 +66,75 @@ func main() {
 		}
 		defer rows.Close()
 
-		columns, _ := rows.Columns()
+        writeHTML(rows)
 
-		for rows.Next() {
-			columnsData := make([]interface{}, len(columns))
-			columnPointers := make([]interface{}, len(columns))
-			for i := range columnsData {
-				columnPointers[i] = &columnsData[i]
-			}
-
-			if err := rows.Scan(columnPointers...); err != nil {
-				fmt.Println("Error scanning row: ", err)
-				continue
-			}
-
-			m := make(map[string]string)
-			for i, colName := range columns {
-				val := columnPointers[i].(*interface{})
-				str, ok := (*val).([]byte)
-				if ok {
-					m[colName] = string(str)
-				} else {
-					m[colName] = fmt.Sprintf("%v", *val)
-				}
-			}
-
-			// Print column names
-			for _, colName := range columns {
-				fmt.Printf("| %15s ", colName)
-			}
-			fmt.Println("|")
-
-			// Print row data
-			for _, colName := range columns {
-				fmt.Printf("| %15s ", m[colName])
-			}
-			fmt.Println("|")
-
-			fmt.Println(strings.Repeat("-", len(columns)*17+1))
-		}
-
-		if rows.Err() != nil {
-			fmt.Println("Error fetching rows: ", err)
-			continue
-		}
+		fmt.Println("Generated index.html successfully")
 	}
 
 	db.Close()
 	fmt.Println("Connection closed")
+}
+
+func writeHTML(rows *sql.Rows) {
+    cols, _ := rows.Columns()
+
+    htmlFile, _ := os.Create("index.html")
+    defer htmlFile.Close()
+
+    htmlFile.WriteString(`<!DOCTYPE html>
+    <html>
+    <head>
+    <style>
+    /* Style the table */
+    table {
+        border-collapse: collapse;
+        width: 100%;
+    }
+
+    /* Style the table cells */
+    th, td {
+        border: 1px solid black;
+        text-align: left;
+        padding: 8px;
+    }
+
+    /* Style the table headers */
+    th {
+        background-color: #f2f2f2;
+    }
+    </style>
+    </head>
+    <body>
+    <table>
+    `)
+
+    htmlFile.WriteString("<tr>\n")
+    for _, column := range cols {
+        htmlFile.WriteString("<th>" + column + "</th>")
+    }
+    htmlFile.WriteString("</tr>\n")
+
+    vals := make([]interface{}, len(cols))
+    for i := 0; i < len(cols); i++ {
+        vals[i] = new(sql.RawBytes)
+    }
+
+    for rows.Next() {
+        err := rows.Scan(vals...)
+        if err != nil {
+            log.Fatal(err)
+        }
+        htmlFile.WriteString("<tr>\n")
+        for _, val := range vals {
+            str := string(*val.(*sql.RawBytes)) // Convert byte array to string
+            htmlFile.WriteString("<td>" + str + "</td>")
+        }
+        htmlFile.WriteString("</tr>\n")
+    }
+
+    htmlFile.WriteString(`
+    </table>
+    </body>
+    </html>`)
 }
 
